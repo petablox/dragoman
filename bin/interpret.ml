@@ -1,46 +1,53 @@
-let input_filename = ref ""
-let output_filename = ref ""
+
+let establish_server server_fun sockaddr =
+   let domain = Unix.domain_of_sockaddr sockaddr in
+   let sock = Unix.socket domain Unix.SOCK_STREAM 0 
+   in Unix.bind sock sockaddr ;
+      Unix.listen sock 3;
+      while true do
+        let (s, _) = Unix.accept sock 
+        in match Unix.fork() with
+               0 -> if Unix.fork() <> 0 then exit 0 ; 
+                    let inchan = Unix.in_channel_of_descr s 
+                    and outchan = Unix.out_channel_of_descr s 
+                    in server_fun inchan outchan ;
+                       close_in inchan ;
+                       close_out outchan ;
+                       exit 0
+             | id -> Unix.close s; ignore(Unix.waitpid [] id)
+      done ;;
+
+let get_my_addr () =
+    (Unix.gethostbyname("127.0.0.1")).Unix.h_addr_list.(0) ;;
+
+let main_server serv_fun =
+   if Array.length Sys.argv < 2 then Printf.eprintf "usage : serv_up port\n"
+   else try
+          let port =  int_of_string Sys.argv.(1) in 
+          let my_address = get_my_addr() 
+          in establish_server serv_fun  (Unix.ADDR_INET(my_address, port))
+        with
+          Failure _ -> 
+            Printf.eprintf "serv_up : bad port number\n" ;;
+
 let verbose = ref false
-let test = ref false
 
-(* spec list *)
-let spec = [
-    ("-i", Arg.Set_string input_filename, " Path to input problem file") ;
-    ("-o", Arg.Set_string output_filename, " Path to output file");
-    ("-v", Arg.Set verbose, " Enables verbose output");
-    ("-t", Arg.Set test, " Enables testing (when no output file provided)")
-]
-
-(* parse the command line arguments *)
-let anon_fun _ = ()
-let usage_msg = "Interprets Horn clauses over CLEVR scenes"
-let _ = Arg.parse spec anon_fun usage_msg
-
-(* setting up verbose output *)
-let vprint str = if !verbose then print_endline str else ()
-
-(* load the input file *)
-let _ = vprint "Loading problem..."
-let problem = Yojson.Basic.from_file !input_filename
+let problem json_str = Yojson.Basic.from_string json_str
     |> Problem.of_json
     |> CCOpt.get_exn
 
-let _ = vprint ("Evaluating " ^ (Horn.Clause.to_string problem.clause) ^ "...")
-let table = Horn.Clause.evaluate ~verbose:!verbose problem.clause problem.scene
-    |> CCOpt.get_exn
+let interpret_service ic oc =
+   try while true do     
+         let json_str = input_line ic in 
+         let pb = problem json_str in 
+         let tb = Horn.Clause.evaluate ~verbose:!verbose pb.clause pb.scene |> CCOpt.get_exn 
+         in output_string oc ( tb |> Core.Table.to_csv ) ; flush oc
+       done
+   with _ -> Printf.printf "End of text\n" ; flush stdout ; exit 0 ;;
 
-let _ = vprint "Writing output..."
-let _ = if !output_filename = "" 
-    then 
-    
-        if !test then match problem.expected with
-            | Some e -> if Core.Table.equal table e 
-                then print_endline "[OK]"
-                else print_endline "[FAIL]"
-            | None -> print_endline "[NO EXPECTATION]"
-        else table |> Core.Table.to_csv |> print_endline
-    else CCIO.with_out 
-            !output_filename 
-            (fun oc -> CCIO.write_line oc (table |> Core.Table.to_csv))
+let go_interpret_service () =
+    Unix.handle_unix_error main_server interpret_service ;;
 
-let _ = vprint "Done."
+(* print_string (Unix.gethostname()); *)
+go_interpret_service ();;
+

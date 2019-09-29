@@ -1,4 +1,4 @@
 (executables
     (names interpret)
-    (libraries dragoman yojson containers)
+    (libraries dragoman yojson containers unix)
 )
