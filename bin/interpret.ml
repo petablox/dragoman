@@ -43,7 +43,7 @@ let interpret_service ic oc =
          let tb = Horn.Clause.evaluate ~verbose:!verbose pb.clause pb.scene |> CCOpt.get_exn 
          in output_string oc ( tb |> Core.Table.to_csv ) ; flush oc
        done
-   with _ -> Printf.printf "End of text\n" ; flush stdout ; exit 0 ;;
+   with _ -> exit 0 ;;
 
 let go_interpret_service () =
     Unix.handle_unix_error main_server interpret_service ;;
